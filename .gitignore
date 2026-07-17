@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+data/chroma_db/
+*.mp4
+*.gif
+.idea/
+.vscode/
+*.log
+.pytest_cache/
