@@ -4,8 +4,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import get_settings
 import logging
-import re
-import pymysql
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -22,31 +20,6 @@ if settings.database_type == "mysql":
 elif settings.database_type == "sqlite":
     engine_params["connect_args"] = {"check_same_thread": False}
 
-
-def _ensure_mysql_database_exists():
-    """MySQL 部署时可能未自动创建目标数据库，这里连接 server 级别自动建库。
-    避免部署时 (1049, "Unknown database 'xxx'") 错误。
-    """
-    if settings.database_type != "mysql":
-        return
-    url = settings.database_url
-    # 从 mysql+pymysql://user:pwd@host:port/dbname 中解析
-    m = re.match(r"mysql\+pymysql://([^:]+):([^@]+)@([^:/]+)(?::(\d+))?/(.+)", url)
-    if not m:
-        return
-    user, pwd, host, port, dbname = m.group(1), m.group(2), m.group(3), m.group(4) or 3306, m.group(5).split("?")[0]
-    try:
-        conn = pymysql.connect(host=host, port=int(port), user=user, password=pwd, database=None)
-        with conn.cursor() as cur:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{dbname}` CHARACTER SET utf8mb4")
-        conn.commit()
-        conn.close()
-        logger.info(f"✓ MySQL 数据库 '{dbname}' 已就绪（自动创建/已存在）")
-    except Exception as e:
-        logger.warning(f"自动建库失败（可忽略，若库已存在）: {e}")
-
-
-_ensure_mysql_database_exists()
 engine = create_engine(settings.database_url, **engine_params)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
