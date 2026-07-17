@@ -14,3 +14,7 @@ data/chroma_db/
 .vscode/
 *.log
 .pytest_cache/
+
+# ChromaDB 模型文件（Dockerfile 构建时从 hf-mirror.com 下载，不进 git）
+chroma_model/
+*.tar.gz
