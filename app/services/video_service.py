@@ -921,10 +921,7 @@ print("RENDER_OK")
                 f.write(render_code)
 
             # 在子进程中执行渲染（使用绝对路径，cwd 也使用绝对路径）
-            env = os.environ.copy()
-            # 确保 FFmpeg 在 PATH 中
-            ffmpeg_dir = "C:/Users/24711/Desktop/remotion-service/node_modules/@remotion/compositor-win32-x64-msvc"
-            env["PATH"] = env.get("PATH", "") + os.pathsep + ffmpeg_dir
+            # ffmpeg 在 Docker 中通过 apt-get 安装，已在默认 PATH 中
 
             result = subprocess.run(
                 [sys.executable, render_script_path],
@@ -932,7 +929,6 @@ print("RENDER_OK")
                 encoding='utf-8',
                 errors='ignore',
                 timeout=600,
-                env=env,
                 cwd=abs_script_dir,  # 使用绝对路径，避免路径混乱
                 creationflags=CREATE_NO_WINDOW,
             )
