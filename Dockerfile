@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 预下载 ChromaDB embedding 模型（避免每次启动从 HuggingFace 下载）
+RUN python -c "from chromadb.utils import embedding_functions; embedding_functions.DefaultEmbeddingFunction(); print('ChromaDB model ready')"
+
 # 应用代码
 COPY . .
 
