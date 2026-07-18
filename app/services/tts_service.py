@@ -299,9 +299,11 @@ class EdgeTTSService:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # edge-tts是异步的，需要在事件循环中运行
+            # ★ 添加超时机制：Sealos pod 网络可能受限，edge-tts 连接微软服务器可能超时
             async def _synthesize():
                 communicate = edge_tts.Communicate(text, voice, rate=rate)
-                await communicate.save(output_path)
+                # 30秒超时：单段旁白通常 < 15 秒，超时说明网络不通
+                await asyncio.wait_for(communicate.save(output_path), timeout=30.0)
 
             # 在新的事件循环中运行（避免与主循环冲突）
             loop = asyncio.new_event_loop()
@@ -318,8 +320,12 @@ class EdgeTTSService:
                 logger.warning("Edge TTS合成失败：文件过小或不存在")
                 return ""
 
+        except asyncio.TimeoutError:
+            logger.error("[TTS FAILED] Edge TTS 超时（30秒）| voice=%s, text='%s...' | 可能是容器网络无法访问微软服务器",
+                         voice, text[:50])
+            return ""
         except Exception as e:
-            logger.error("Edge TTS合成异常: %s", e, exc_info=True)
+            logger.error("[TTS FAILED] Edge TTS合成异常: %s | voice=%s, text='%s...'", str(e), voice, text[:50], exc_info=True)
             return ""
 
 
