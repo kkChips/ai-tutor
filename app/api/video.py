@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
@@ -29,6 +30,7 @@ from app.services.video import video_orchestrator, video_task_manager
 from app.services.video.adapters import FALLBACK_CHAIN
 from app.services.video.skills import VideoSkill, infer_skill, get_skill_template_id, get_skill_recommended_duration
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -58,11 +60,22 @@ async def generate_video(request: VideoGenerateRequest):
     # 先检查缓存
     cached = video_service.get_cached_video(request.knowledge_point, request.style)
     if cached:
+        # ★ 关键修复：缓存命中时创建新的 task 记录并标记为 done
+        # 否则返回的旧 task_id 可能已过 Redis TTL（24h），前端轮询会 404
+        cached_video_url = cached.get("video_url", "")
+        new_task_id = video_task_manager.create_task(
+            user_id=request.user_id,
+            kp_id=request.knowledge_point,
+            provider="manim",
+        )
+        video_task_manager.mark_done(new_task_id, cached_video_url)
+        logger.info("[VIDEO CACHE HIT] kp=%s, created new task_id=%s -> cached_url=%s",
+                    request.knowledge_point, new_task_id, cached_video_url)
         return {
-            "task_id": cached["task_id"],
+            "task_id": new_task_id,
             "status": "completed",
             "message": "视频已缓存，直接返回",
-            "video_url": cached["video_url"],
+            "video_url": cached_video_url,
         }
 
     # 通过 Orchestrator 提交任务（降级链）
