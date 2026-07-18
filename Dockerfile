@@ -15,7 +15,22 @@ RUN apt-get update && apt-get install -y \
     libgdk-pixbuf-2.0-dev \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
+
+# ★ 创建字体别名：让 "Microsoft YaHei" 映射到 "Noto Sans CJK SC"
+# 原因：代码中 Manim prompt 和字幕样式硬编码了 font="Microsoft YaHei"
+# Linux 容器没有 Microsoft YaHei，需要 fontconfig 别名让 Manim/Pango 能找到中文字体
+RUN mkdir -p /etc/fonts/conf.d && \
+    echo '<?xml version="1.0" encoding="UTF-8"?>' > /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '<fontconfig>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>Microsoft YaHei</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>微软雅黑</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>SimHei</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>SimSun</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '</fontconfig>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    fc-cache -f
 
 # Python 依赖
 COPY requirements.txt .
