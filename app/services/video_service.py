@@ -723,6 +723,7 @@ _OrigMarkupText.__init__ = _safe_markup_init
         返回视频文件路径
         """
         if not self._manim_available:
+            logger.error("[MANIM FAILED] Manim未安装 | 请执行: pip install manim")
             return {
                 "status": "failed",
                 "message": "Manim 未安装。请安装: pip install manim",
@@ -750,8 +751,9 @@ _OrigMarkupText.__init__ = _safe_markup_init
             import py_compile
             try:
                 py_compile.compile(script_path, doraise=True)
+                logger.info("[MANIM] 脚本语法检查通过 | path=%s", script_path)
             except py_compile.PyCompileError as e:
-                logger.error("Manim脚本语法错误，跳过子进程渲染: %s", e)
+                logger.error("[MANIM FAILED] 脚本语法错误 | path=%s, error=%s", script_path, str(e))
                 return {
                     "status": "failed",
                     "message": f"脚本语法错误: {e}",
@@ -759,11 +761,11 @@ _OrigMarkupText.__init__ = _safe_markup_init
                 }
 
             # 使用 Manim Python API 渲染
+            logger.info("[MANIM] 开始渲染子进程 | script_path=%s", script_path)
             video_path = self._render_with_manim_api(script, script_dir, scene_class)
 
             if video_path is None:
-                # Manim渲染失败，保留脚本用于调试，返回失败状态
-                logger.error("Manim渲染失败，脚本保留在: %s", script_dir)
+                logger.error("[MANIM FAILED] 渲染返回空路径 | script_dir=%s, scene_class=%s", script_dir, scene_class)
                 return {
                     "status": "failed",
                     "message": "Manim渲染失败，请检查脚本语法或坐标格式",
@@ -778,6 +780,8 @@ _OrigMarkupText.__init__ = _safe_markup_init
             # 清理临时目录
             shutil.rmtree(script_dir, ignore_errors=True)
 
+            logger.info("[MANIM SUCCESS] 渲染完成 | final_path=%s, size=%d bytes",
+                       final_path, os.path.getsize(final_path) if os.path.exists(final_path) else 0)
             return {
                 "status": "completed",
                 "video_path": final_path,
@@ -785,13 +789,16 @@ _OrigMarkupText.__init__ = _safe_markup_init
             }
 
         except subprocess.TimeoutExpired:
+            logger.error("[MANIM FAILED] 渲染超时(5分钟) | scene_class=%s", scene_class)
             return {
                 "status": "failed",
                 "message": "Manim渲染超时（5分钟）",
                 "script_content": script,
             }
         except Exception as e:
-            logger.error("Manim渲染异常: %s", e)
+            import traceback
+            logger.error("[MANIM FAILED] 渲染异常 | scene_class=%s, error=%s", scene_class, str(e))
+            logger.error("[MANIM FAILED] Traceback: %s", traceback.format_exc())
             return {
                 "status": "failed",
                 "message": f"Manim渲染异常: {e}",
@@ -1755,14 +1762,24 @@ class {class_name}(Scene):
         # 根据发音人选择TTS服务
         service = get_tts_service(voice)
         if not service.available:
-            logger.warning("TTS服务不可用: voice=%s，跳过音频生成", voice)
+            logger.error("[TTS FAILED] 服务不可用 | voice=%s, service_type=%s", voice, type(service).__name__)
             return ""
 
         audio_id = str(uuid.uuid4())[:8]
         audio_path = os.path.join(VIDEO_OUTPUT_DIR, f"tts_{audio_id}.mp3")
 
-        result = service.save_audio(text, audio_path, voice, speed)
-        return result
+        try:
+            result = service.save_audio(text, audio_path, voice, speed)
+            if result and os.path.exists(result):
+                file_size = os.path.getsize(result)
+                logger.info("[TTS SUCCESS] 音频生成成功 | voice=%s, path=%s, size=%d bytes", voice, result, file_size)
+                return result
+            else:
+                logger.error("[TTS FAILED] 音频生成失败 | voice=%s, text=%s", voice, text[:50])
+                return ""
+        except Exception as e:
+            logger.error("[TTS FAILED] 音频生成异常 | voice=%s, error=%s", voice, str(e))
+            return ""
 
     @staticmethod
     def _make_subtitle_clip(text: str, video_width: int, video_height: int, duration: float):
@@ -2392,7 +2409,13 @@ class {class_name}(Scene):
         """
         task = self._get_task(task_id)
         if not task:
+            logger.error("[VIDEO FAILED] task_id=%s not found in storage", task_id)
             return
+
+        logger.info("=" * 60)
+        logger.info("[VIDEO START] task_id=%s, knowledge_point=%s, style=%s, with_tts=%s",
+                    task_id, knowledge_point, style, with_tts)
+        logger.info("=" * 60)
 
         try:
             # Step 1: LLM生成讲解脚本
@@ -2402,7 +2425,14 @@ class {class_name}(Scene):
             self._save_task(task)
 
             script = self._generate_narration_script(knowledge_point, style)
+            if not script or not script.get("segments"):
+                logger.error("[VIDEO FAILED] Step 1: LLM脚本生成失败 | Reason: 空脚本或无segments")
+                task.status = "failed"
+                task.message = "LLM脚本生成失败：返回空内容"
+                self._save_task(task)
+                return
             task.script_content = json.dumps(script, ensure_ascii=False, indent=2)
+            logger.info("[VIDEO SUCCESS] Step 1: LLM脚本生成完成 | segments=%d", len(script.get("segments", [])))
 
             # Step 2: 先生成TTS音频并测量实际时长
             task.progress = 25
@@ -2412,30 +2442,54 @@ class {class_name}(Scene):
             audio_segments = []
             actual_durations = []
             tts_available = edge_tts_service.available or tts_service.available
+
+            # === TTS 可用性诊断日志 ===
+            logger.info("-" * 40)
+            logger.info("[TTS CHECK] with_tts=%s", with_tts)
+            logger.info("[TTS CHECK] edge_tts_service.available=%s", edge_tts_service.available)
+            logger.info("[TTS CHECK] tts_service.available=%s", tts_service.available)
+            logger.info("[TTS CHECK] tts_available=%s", tts_available)
+            logger.info("-" * 40)
+
             if with_tts and tts_available:
                 style_config = STYLE_CONFIG.get(style, STYLE_CONFIG["rigorous"])
                 use_voice = voice if voice else style_config["voice"]
                 segments = script.get("segments", [])
+                logger.info("[TTS START] 开始生成 %d 段音频, voice=%s", len(segments), use_voice)
+
                 for i, segment in enumerate(segments):
                     audio_path = self._generate_tts_audio(
                         text=segment["narration"],
                         voice=use_voice,
                         speed=style_config["speed"],
                     )
-                    if audio_path:
+                    if audio_path and os.path.exists(audio_path):
                         audio_segments.append(audio_path)
                         try:
                             from moviepy import AudioFileClip
                             clip = AudioFileClip(audio_path)
                             real_dur = clip.duration
                             clip.close()
-                        except Exception:
+                        except Exception as e:
+                            logger.warning("[TTS] 段%d无法读取时长: %s, 使用预估时长", i+1, e)
                             real_dur = segment.get("duration", 5)
                         actual_durations.append(real_dur)
+                        logger.info("[TTS SUCCESS] 段%d: %s -> %.1fs, path=%s", i+1, segment["narration"][:20], real_dur, audio_path)
                     else:
                         actual_durations.append(segment.get("duration", 5))
+                        logger.warning("[TTS FAILED] 段%d: 音频生成失败, text=%s", i+1, segment["narration"][:30])
                     task.progress = 25 + int(15 * (i + 1) / max(len(segments), 1))
                     self._save_task(task)
+
+                if audio_segments:
+                    logger.info("[TTS SUCCESS] 音频生成完成 | 共%d段, 总时长%.1fs", len(audio_segments), sum(actual_durations))
+                else:
+                    logger.warning("[TTS FAILED] 所有音频生成失败 | 将生成无声音频")
+            elif not with_tts:
+                logger.info("[TTS SKIP] with_tts=False, 跳过音频生成")
+            else:
+                logger.error("[TTS FAILED] TTS服务不可用 | edge_tts=%s, xunfei=%s",
+                            edge_tts_service.available, tts_service.available)
 
             # Step 3: 用实际时长生成Manim代码
             task.progress = 45
@@ -2445,6 +2499,7 @@ class {class_name}(Scene):
             manim_code = self._generate_manim_from_script_with_durations(
                 knowledge_point, script, style, actual_durations
             )
+            logger.info("[MANIM] Step 3: Manim代码生成完成 | length=%d chars", len(manim_code) if manim_code else 0)
 
             # 确定Scene类名 - 优先使用模板注册的类名，避免大小写不匹配
             template = get_manim_template(knowledge_point)
@@ -2457,32 +2512,39 @@ class {class_name}(Scene):
                 if not safe_class_name or not re.match(r'^[a-zA-Z_]', safe_class_name):
                     safe_class_name = 'KnowledgePoint'
                 scene_class = safe_class_name + "Scene"
-
-            task.progress = 55
-            task.message = "正在渲染Manim视频..."
-            logger.info("[Video DEBUG] Progress 55%%, status=%s, starting Manim render", task.status)
-            self._save_task(task)
+            logger.info("[MANIM] Scene类名: %s", scene_class)
 
             # Step 4: 渲染Manim视频（动画时长已匹配音频，音画同步）
+            task.progress = 55
+            task.message = "正在渲染Manim视频..."
+            self._save_task(task)
+            logger.info("-" * 40)
+            logger.info("[MANIM START] 开始渲染 | scene_class=%s", scene_class)
+
             render_result = self.render_video(manim_code, scene_class)
 
             if render_result.get("status") != "completed":
+                error_msg = render_result.get("message", "视频渲染失败")
+                logger.error("[MANIM FAILED] Step 4: 渲染失败 | Reason: %s", error_msg)
                 task.status = render_result.get("status", "failed")
-                task.message = render_result.get("message", "视频渲染失败")
+                task.message = error_msg
                 task.script_content = render_result.get("script_content", "")
                 task.progress = 55
                 self._save_task(task)
                 return
 
             video_path = render_result.get("video_path", "")
+            logger.info("[MANIM SUCCESS] Step 4: 渲染完成 | video_path=%s", video_path)
             task.video_path = video_path
-            task.progress = 80
-            task.message = "正在拼接视频和音频..."
-            logger.info("[Video DEBUG] Progress 80%%, status=%s, video_path=%s, Manim render completed", task.status, video_path)
-            self._save_task(task)
 
             # Step 5: 拼接视频+音频+SRT字幕（音字同步）
+            task.progress = 80
+            task.message = "正在拼接视频和音频..."
+            self._save_task(task)
+
+            final_path = None
             if audio_segments:
+                logger.info("[COMPOSE] Step 5: 开始拼接 | video=%s, audio_segments=%d", video_path, len(audio_segments))
                 narrations_for_video = [s["narration"] for s in script.get("segments", [])][:len(audio_segments)]
                 final_path = self._compose_final_video(
                     video_path=video_path,
@@ -2494,26 +2556,29 @@ class {class_name}(Scene):
                     style=style,
                 )
                 if final_path:
+                    logger.info("[COMPOSE SUCCESS] Step 5: 拼接完成 | final_path=%s", final_path)
                     task.video_path = final_path
+                else:
+                    logger.warning("[COMPOSE FAILED] Step 5: 拼接失败，使用原始Manim视频 | video_path=%s", video_path)
+            else:
+                logger.info("[COMPOSE SKIP] Step 5: 无音频，跳过拼接 | video_path=%s", video_path)
 
             # 检查视频文件完整性：文件必须存在且大小合理(>10KB)
             final_video_path = task.video_path if audio_segments and final_path else video_path
             if os.path.exists(final_video_path):
                 file_size = os.path.getsize(final_video_path)
-                # 降低阈值到10KB，允许短视频通过检查（短期修复）
-                # 长期需要优化Manim脚本生成逻辑，确保生成完整视频
                 if file_size < 10 * 1024:  # 小于 10KB 视为损坏
-                    logger.warning("视频文件过小(%d bytes),可能损坏: %s", file_size, final_video_path)
+                    logger.error("[VIDEO FAILED] Step 6: 视频文件损坏 | path=%s, size=%d bytes (< 10KB)", final_video_path, file_size)
                     task.status = "failed"
                     task.message = f"视频文件损坏(大小: {file_size} bytes),请重新生成"
                     task.progress = 95
                     self._save_task(task)
                     return
-                logger.info("视频文件检查通过: %s (%d bytes)", final_video_path, file_size)
+                logger.info("[VIDEO SUCCESS] Step 6: 视频文件检查通过 | path=%s, size=%d bytes", final_video_path, file_size)
                 task.video_url = f"/static/videos/{os.path.basename(final_video_path)}"
-                task.subtitle_url = f"/static/videos/subs_{task_id}.vtt"  # VTT字幕URL
+                task.subtitle_url = f"/static/videos/subs_{task_id}.vtt"
             else:
-                logger.error("视频文件不存在: %s", final_video_path)
+                logger.error("[VIDEO FAILED] Step 6: 视频文件不存在 | path=%s", final_video_path)
                 task.status = "failed"
                 task.message = "视频文件生成失败,文件不存在"
                 task.progress = 95
@@ -2523,7 +2588,17 @@ class {class_name}(Scene):
             task.status = "completed"
             task.progress = 100
             task.message = "视频生成完成"
-            logger.info("[Video DEBUG] Progress 100%%, status=completed, video_url=%s, video generation fully completed", task.video_url)
+
+            # === 最终成功日志 ===
+            logger.info("=" * 60)
+            logger.info("[VIDEO SUCCESS] 全流程完成!")
+            logger.info("  - task_id: %s", task_id)
+            logger.info("  - knowledge_point: %s", knowledge_point)
+            logger.info("  - style: %s", style)
+            logger.info("  - video_url: %s", task.video_url)
+            logger.info("  - audio_segments: %d", len(audio_segments))
+            logger.info("  - file_size: %s", os.path.getsize(final_video_path) if os.path.exists(final_video_path) else "N/A")
+            logger.info("=" * 60)
 
             # 缓存
             cache_key = f"{knowledge_point}_{style}"
@@ -2531,9 +2606,14 @@ class {class_name}(Scene):
             self._save_task(task)
 
         except Exception as e:
+            import traceback
+            logger.error("=" * 60)
+            logger.error("[VIDEO FAILED] 未捕获异常 | task_id=%s", task_id)
+            logger.error("  - Exception: %s", str(e))
+            logger.error("  - Traceback:\n%s", traceback.format_exc())
+            logger.error("=" * 60)
             task.status = "failed"
             task.message = f"视频生成失败: {str(e)}"
-            logger.error("后台视频生成失败: %s", e)
             self._save_task(task)
 
     def list_available_videos(self) -> list[dict]:
