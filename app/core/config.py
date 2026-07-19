@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     oss_secret_key: str = ""
     oss_bucket: str = "ai-tutor"
 
+    # TTS Configuration
+    tts_provider: str = "xunfei"  # "xunfei" | "edge" - 默认使用讯飞TTS
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

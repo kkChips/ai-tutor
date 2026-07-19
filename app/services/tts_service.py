@@ -329,8 +329,8 @@ class EdgeTTSService:
             return ""
 
 
-def get_tts_service(voice: str) -> object:
-    """根据发音人名称选择TTS服务
+def get_tts_service(voice: str = None) -> object:
+    """根据发音人名称和配置选择TTS服务
 
     Args:
         voice: 发音人名称
@@ -340,8 +340,23 @@ def get_tts_service(voice: str) -> object:
     Returns:
         TTS服务实例（TTSService 或 EdgeTTSService）
     """
+    settings = get_settings()
+
+    # 优先使用配置中的 TTS 提供者
+    if settings.tts_provider == "xunfei":
+        # 检查讯飞 TTS 是否可用（有凭据）
+        if tts_service.available:
+            return tts_service
+        # 如果讯飞不可用，尝试 Edge TTS
+        elif edge_tts_service.available:
+            logger.warning("讯飞 TTS 不可用，降级使用 Edge TTS")
+            return edge_tts_service
+
+    # 使用 Edge TTS
     if voice and voice.startswith("zh-CN-"):
         return edge_tts_service
+
+    # 默认返回讯飞 TTS
     return tts_service
 
 
