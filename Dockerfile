@@ -5,9 +5,10 @@ WORKDIR /app
 # Manim 系统依赖（Cairo + Pango + ffmpeg + 中文字体）
 # 注意：不装 texlive（项目禁用 Tex/MathTex，改用 Text/MarkupText），避免镜像过大
 # ★ 使用阿里云镜像源加速（国内构建环境）
+# ★ 精简依赖：只装必要的字体包，减少镜像大小
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
     sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && apt-get install -y \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     pkg-config \
@@ -17,9 +18,9 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     libpango1.0-dev \
     libgdk-pixbuf-2.0-dev \
     fonts-noto-cjk \
-    fonts-noto-cjk-extra \
     fontconfig \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # ★ 创建字体别名：让 "Microsoft YaHei" 映射到 "Noto Sans CJK SC"
 # 原因：代码中 Manim prompt 和字幕样式硬编码了 font="Microsoft YaHei"
