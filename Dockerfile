@@ -4,7 +4,10 @@ WORKDIR /app
 
 # Manim 系统依赖（Cairo + Pango + ffmpeg + 中文字体）
 # 注意：不装 texlive（项目禁用 Tex/MathTex，改用 Text/MarkupText），避免镜像过大
-RUN apt-get update && apt-get install -y \
+# ★ 使用阿里云镜像源加速（国内构建环境）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y \
     gcc \
     g++ \
     pkg-config \
@@ -15,11 +18,27 @@ RUN apt-get update && apt-get install -y \
     libgdk-pixbuf-2.0-dev \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
+# ★ 创建字体别名：让 "Microsoft YaHei" 映射到 "Noto Sans CJK SC"
+# 原因：代码中 Manim prompt 和字幕样式硬编码了 font="Microsoft YaHei"
+# Linux 容器没有 Microsoft YaHei，需要 fontconfig 别名让 Manim/Pango 能找到中文字体
+RUN mkdir -p /etc/fonts/conf.d && \
+    echo '<?xml version="1.0" encoding="UTF-8"?>' > /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '<fontconfig>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>Microsoft YaHei</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>微软雅黑</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>SimHei</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '  <alias><family>SimSun</family><prefer><family>Noto Sans CJK SC</family></prefer></alias>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    echo '</fontconfig>' >> /etc/fonts/conf.d/99-microsoft-yahei-alias.conf && \
+    fc-cache -f
+
 # Python 依赖
+# ★ 使用清华 pip 源加速（国内构建环境）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 预下载 ChromaDB embedding 模型（独立 layer，代码改动不触发重新下载）
 #
