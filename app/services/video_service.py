@@ -1804,7 +1804,24 @@ class {class_name}(Scene):
             import numpy as np
             from moviepy import ImageClip as _ImageClip
 
-            font_path = "C:/Windows/Fonts/msyh.ttc"
+            # ★ 字体路径跨平台适配
+            # Windows: C:/Windows/Fonts/msyh.ttc
+            # Linux: fonts-noto-cjk 安装路径（Dockerfile 已安装）
+            import platform
+            if platform.system() == "Windows":
+                font_path = "C:/Windows/Fonts/msyh.ttc"
+            else:
+                # 尝试多个 Linux 中文字体路径
+                candidate_paths = [
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                ]
+                font_path = ""
+                for p in candidate_paths:
+                    if os.path.exists(p):
+                        font_path = p
+                        break
             # 按视频分辨率缩放（Remotion 是 1920x1080）
             scale = video_width / 1920
             font_size = max(int(32 * scale), 16)
@@ -1908,13 +1925,18 @@ class {class_name}(Scene):
             最终视频文件路径，失败返回None
         """
         try:
-            from imageio_ffmpeg import get_ffmpeg_exe
-            ffmpeg_exe = get_ffmpeg_exe()
-        except ImportError:
-            logger.error("imageio_ffmpeg未安装")
-            return None
+            # ★ 优先使用系统 ffmpeg（Docker 容器已安装 ffmpeg apt 包）
+            # 避免依赖 imageio_ffmpeg 下载的二进制（Linux 平台可能下载失败）
+            ffmpeg_exe = shutil.which("ffmpeg")
+            if not ffmpeg_exe:
+                try:
+                    from imageio_ffmpeg import get_ffmpeg_exe
+                    ffmpeg_exe = get_ffmpeg_exe()
+                except ImportError:
+                    logger.error("[COMPOSE FAILED] ffmpeg 未安装且 imageio_ffmpeg 不可用")
+                    return None
+            logger.info("[COMPOSE] 使用 ffmpeg: %s", ffmpeg_exe)
 
-        try:
             # Step 1: 合并音频
             merged_audio_path = os.path.join(VIDEO_OUTPUT_DIR, f"merged_{task_id}.mp3")
             if not self._merge_audio_files(audio_segments, merged_audio_path):
@@ -1963,8 +1985,18 @@ class {class_name}(Scene):
             # 1080p: 60px, 720p: 40px, 480p: 20px
             margin_v = max(int(60 * scale), 20)
 
+            # ★ 字体选择：Linux 用 Noto Sans CJK，Windows 用 Microsoft YaHei
+            # Dockerfile 安装了 fonts-noto-cjk，但容器中没有 Microsoft YaHei
+            # ffmpeg subtitles filter 需要 libass，FontName 必须是系统可用字体
+            import platform
+            if platform.system() == "Windows":
+                subtitle_font = "Microsoft YaHei"
+            else:
+                # Linux: fonts-noto-cjk 安装的字体名
+                subtitle_font = "Noto Sans CJK SC"
+
             force_style = (
-                f"FontName=Microsoft YaHei,"
+                f"FontName={subtitle_font},"
                 f"FontSize={font_size},"
                 f"PrimaryColour=&H00000000,"
                 f"BackColour=&H99FFFFFF,"
@@ -2180,10 +2212,17 @@ class {class_name}(Scene):
             True成功，False失败
         """
         try:
-            from imageio_ffmpeg import get_ffmpeg_exe
-            ffmpeg_exe = get_ffmpeg_exe()
-        except ImportError:
-            logger.error("imageio_ffmpeg未安装，无法烧录字幕")
+            # ★ 优先使用系统 ffmpeg（Docker 容器已安装 ffmpeg apt 包）
+            ffmpeg_exe = shutil.which("ffmpeg")
+            if not ffmpeg_exe:
+                try:
+                    from imageio_ffmpeg import get_ffmpeg_exe
+                    ffmpeg_exe = get_ffmpeg_exe()
+                except ImportError:
+                    logger.error("[SUBTITLE FAILED] ffmpeg 未安装且 imageio_ffmpeg 不可用")
+                    return False
+        except Exception:
+            logger.error("[SUBTITLE FAILED] 获取 ffmpeg 失败")
             return False
 
         # 按视频分辨率缩放字幕样式（对标1920x1080的Remotion）
@@ -2198,11 +2237,18 @@ class {class_name}(Scene):
         primary_color = "&H00000000"  # 黑色文字
         back_color = "&H99FFFFFF"     # 半透明白底，alpha=99≈0.6
 
+        # ★ 字体跨平台适配（同 _compose_final_video）
+        import platform
+        if platform.system() == "Windows":
+            subtitle_font = "Microsoft YaHei"
+        else:
+            subtitle_font = "Noto Sans CJK SC"
+
         # 构建force_style参数
         # BorderStyle=4: 不透明底框
         # Alignment=2: ffmpeg底部居中（行业标准，不遮挡画面内容）
         force_style = (
-            f"FontName=Microsoft YaHei,"
+            f"FontName={subtitle_font},"
             f"FontSize={font_size},"
             f"PrimaryColour={primary_color},"
             f"BackColour={back_color},"
